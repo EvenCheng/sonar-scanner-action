@@ -376,25 +376,25 @@ func (r *Run) retrieveProjectAnalysisStatus(
 	ctx context.Context,
 	client *http.Client,
 	analysisId string,
-) (AnalysisStatus, ProjectStatus, error) {
+) (AnalysisStatus, []ProjectStatusCondition, error) {
 	url := getApiUrl(r.sonarHostUrl, fmt.Sprintf("/api/qualitygates/project_status?analysisId=%s", analysisId))
 	r.log.Debugf("Reading analysis status from %s", url)
+	var conditions []ProjectStatusCondition
 
 	response, err := r.makeSonarServerRequest(ctx, client, "GET", url)
 	if err != nil {
 		if err == context.Canceled {
-			return AnalysisStatusUndefined, ProjectStatus{}, AnalysisStatusWaitTimeout
+			return AnalysisStatusUndefined, conditions, AnalysisStatusWaitTimeout
 		}
 
-		return AnalysisStatusUndefined, ProjectStatus{}, err
+		return AnalysisStatusUndefined, conditions, err
 	}
 
 	status, err := parseAnalysisStatus(response.Get("projectStatus.status").Str)
 	if err != nil {
-		return AnalysisStatusUndefined, ProjectStatus{}, err
+		return AnalysisStatusUndefined, conditions, err
 	}
 
-	var conditions []ProjectStatusCondition
 	conditions = parseProjectConditions(response.Get("projectStatus.conditions").Str)
 
 	r.log.Debugf("Analysis status returned in response was '%s'", status)
