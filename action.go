@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"os"
 
 	"github.com/LowCostCustoms/sonar-scanner-action/internal/environment"
 	"github.com/LowCostCustoms/sonar-scanner-action/internal/sonarscanner"
@@ -60,7 +61,7 @@ func main() {
 		ctx, cancel := context.WithTimeout(context.Background(), env.QualityGateWaitTimeout)
 		defer cancel()
 
-		status, err := run.RetrieveProjectanalysisStatus(ctx)
+		status, projectStatus, err := run.RetrieveProjectanalysisStatus(ctx)
 		if err != nil {
 			log.Fatalf("Failed to retrieve the task status: %s", err)
 		}
@@ -76,6 +77,17 @@ func main() {
 		}
 
 		log.Infof("Quality gate status '%s'", analysisStatus)
+
+		file, err := os.Create("sonarqube-status.txt")
+		if err != nil {
+			log.Fatal("Error to create sonarqube-status.txt")
+		}
+		defer file.Close()
+		for _, condition := range projectStatus {
+			file.WriteString(condition.Key + " is " + condition.Status + " and the value is " + condition.Value + "\n")
+		}
+
+
 	}
 
 	log.Infof("Done")

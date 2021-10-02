@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -192,17 +193,18 @@ func (r *Run) RunScanner(ctx context.Context) error {
 	return runSonarScanner(r.log.WithField("prefix", "sonar-scanner-cli"), cmd)
 }
 
-func (r *Run) RetrieveProjectanalysisStatus(ctx context.Context) (ProjectAnalysisStatus, error) {
+func (r *Run) RetrieveProjectanalysisStatus(ctx context.Context) (ProjectAnalysisStatus, []ProjectStatusCondition, error) {
 	status := ProjectAnalysisStatus{
 		TaskStatus:     TaskStatusUndefined,
 		AnalysisStatus: AnalysisStatusUndefined,
 	}
+	var conditions []ProjectStatusCondition
 
 	r.log.Infof("Using metadata file %s", r.metadataFilePath)
 
 	url, err := getTaskUrlFromFile(r.metadataFilePath)
 	if err != nil {
-		return undefinedAnalysisStatus, err
+		return undefinedAnalysisStatus, conditions, err
 	}
 
 	r.log.Infof("Using task result url %s", url)
@@ -218,23 +220,23 @@ func (r *Run) RetrieveProjectanalysisStatus(ctx context.Context) (ProjectAnalysi
 
 	taskStatus, err := r.retrieveTaskStatus(ctx, client, url)
 	if err != nil {
-		return status, err
+		return status, conditions, err
 	}
 
 	status.TaskStatus = taskStatus.taskStatus
 	if status.TaskStatus != TaskStatusSuccess {
-		return status, nil
+		return status, conditions, nil
 	}
 
 	r.log.Infof("Retrieving quality gate status")
 
-	analysisStatus, err := r.retrieveProjectAnalysisStatus(ctx, client, taskStatus.analysisId)
+	analysisStatus, conditions, err := r.retrieveProjectAnalysisStatus(ctx, client, taskStatus.analysisId)
 	if err != nil {
-		return status, err
+		return status, conditions, err
 	}
 
 	status.AnalysisStatus = analysisStatus
-	return status, nil
+	return status, conditions, nil
 }
 
 func (r *Run) runReverseProxy(ctx context.Context) error {
@@ -374,27 +376,37 @@ func (r *Run) retrieveProjectAnalysisStatus(
 	ctx context.Context,
 	client *http.Client,
 	analysisId string,
-) (AnalysisStatus, error) {
+) (AnalysisStatus, ProjectStatus, error) {
 	url := getApiUrl(r.sonarHostUrl, fmt.Sprintf("/api/qualitygates/project_status?analysisId=%s", analysisId))
 	r.log.Debugf("Reading analysis status from %s", url)
 
 	response, err := r.makeSonarServerRequest(ctx, client, "GET", url)
 	if err != nil {
 		if err == context.Canceled {
-			return AnalysisStatusUndefined, AnalysisStatusWaitTimeout
+			return AnalysisStatusUndefined, ProjectStatus{}, AnalysisStatusWaitTimeout
 		}
 
-		return AnalysisStatusUndefined, err
+		return AnalysisStatusUndefined, ProjectStatus{}, err
 	}
 
 	status, err := parseAnalysisStatus(response.Get("projectStatus.status").Str)
 	if err != nil {
-		return AnalysisStatusUndefined, err
+		return AnalysisStatusUndefined, ProjectStatus{}, err
 	}
+
+	var conditions []ProjectStatusCondition
+	conditions = parseProjectConditions(response.Get("projectStatus.conditions").Str)
 
 	r.log.Debugf("Analysis status returned in response was '%s'", status)
 
-	return status, nil
+	return status, conditions, nil
+}
+
+func parseProjectConditions(value string) []ProjectStatusCondition {
+	var jsonMap []ProjectStatusCondition
+	json.Unmarshal([]byte(value), &jsonMap)
+
+	return jsonMap
 }
 
 func processResponse(response *http.Response) (*gjson.Result, error) {
