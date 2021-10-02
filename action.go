@@ -78,7 +78,7 @@ func main() {
 
 		log.Infof("Quality gate status '%s'", analysisStatus)
 
-		file, err := os.Create("sonarqube-status.txt")
+		file, err := os.Create("/home/ec2-user/actions-runner/sonarqube-status.txt")
 		if err != nil {
 			log.Fatal("Error to create sonarqube-status.txt")
 		}
